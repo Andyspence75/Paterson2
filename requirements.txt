@@ -1,8 +1,10 @@
 streamlit
 langchain
 openai
-faiss-cpu
+langchain-community
+langchain-openai
 huggingface_hub
 unstructured
+pdfminer.six
 python-docx
 spacy
