@@ -1,10 +1,11 @@
 streamlit
 langchain
-openai
 langchain-community
 langchain-openai
-huggingface_hub
+openai
+faiss-cpu
 unstructured
-pdfminer.six
-python-docx
+PyMuPDF
 spacy
+huggingface_hub
+sentence-transformers
