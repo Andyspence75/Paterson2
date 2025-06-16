@@ -1,11 +1,10 @@
 streamlit
 langchain
-openai
 langchain-openai
 langchain-community
-PyPDF2
-huggingface_hub
-sentence-transformers
-spacy
 faiss-cpu
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1.tar.gz
+openai
+huggingface_hub
+unstructured
+spacy
+pdfminer.six
