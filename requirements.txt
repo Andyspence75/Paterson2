@@ -1,0 +1,9 @@
+streamlit
+langchain
+langchain-community
+langchain-openai
+openai
+qdrant-client
+unstructured
+pdfminer.six
+sentence-transformers
