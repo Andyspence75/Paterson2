@@ -1,81 +1,59 @@
+
 import streamlit as st
-from langchain.chains import RetrievalQA
-from langchain.vectorstores import FAISS
+from langchain.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
+from langchain.vectorstores import FAISS
 from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.chains import RetrievalQA
 from langchain_openai import ChatOpenAI
 from redactor import redact_text
 import os
-import shutil
-from uuid import uuid4
+import pickle
 
-st.set_page_config(page_title="Housing QA", layout="wide")
-st.title("Housing Disrepair Q&A Assistant")
+st.set_page_config(page_title="Housing QA System", layout="wide")
+st.title("🏠 Housing Disrepair QA System")
 
-# Session state
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+persist_dir = "vector_store"
+if not os.path.exists(persist_dir):
+    os.makedirs(persist_dir)
 
-# Admin/user toggle
-mode = st.radio("Select mode:", ["User", "Admin"])
+uploaded_file = st.file_uploader("Upload a PDF Survey Report", type="pdf")
 
-# Optional redaction
-apply_redaction = st.checkbox("Redact personal info (Admin only)", value=True if mode == "Admin" else False)
+question = st.text_input("Ask a question (without uploading a file):")
 
-# Allow general queries
-general_question = st.text_input("Ask a general question (no file required):")
-if general_question:
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo")
-    response = llm.invoke(general_question)
-    st.markdown("**Answer:** " + response.content)
+docs = []
 
-# File upload
-uploaded_files = st.file_uploader("Upload documents (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"], accept_multiple_files=True)
+if uploaded_file:
+    st.info("Processing uploaded document...")
+    with open("temp.pdf", "wb") as f:
+        f.write(uploaded_file.read())
+    loader = PyPDFLoader("temp.pdf")
+    raw_docs = loader.load()
+    redacted_docs = [doc for doc in redact_text(raw_docs)]
+    docs.extend(redacted_docs)
 
-if uploaded_files:
-    st.info("Processing uploaded documents...")
-    os.makedirs("data", exist_ok=True)
-    docs = []
-
-    for uploaded_file in uploaded_files:
-        temp_path = os.path.join("data", f"{uuid4()}_{uploaded_file.name}")
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.read())
-
-        if apply_redaction:
-            with open(temp_path, "r", encoding="utf-8", errors="ignore") as f:
-                redacted = redact_text(f.read())
-            with open(temp_path, "w", encoding="utf-8") as f:
-                f.write(redacted)
-
-        if uploaded_file.name.endswith(".pdf"):
-            loader = PyPDFLoader(temp_path)
-        elif uploaded_file.name.endswith(".docx"):
-            loader = Docx2txtLoader(temp_path)
-        else:
-            loader = TextLoader(temp_path)
-
-        docs.extend(loader.load())
-
-    # Embedding and vector storage
+if docs:
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     splits = splitter.split_documents(docs)
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    vectordb = FAISS.from_documents(splits, embeddings)
 
-    # Retrieval chain
-    retriever = vectordb.as_retriever()
+    # Load or build vector DB
+    if os.path.exists(f"{persist_dir}/faiss_index"):
+        db = FAISS.load_local(persist_dir, embeddings, allow_dangerous_deserialization=True)
+        db.add_documents(splits)
+    else:
+        db = FAISS.from_documents(splits, embeddings)
+    db.save_local(persist_dir)
+
+    retriever = db.as_retriever()
     llm = ChatOpenAI(model_name="gpt-3.5-turbo")
-    qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, return_source_documents=True)
+    qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
 
-    st.success("Documents processed. You can now ask questions.")
-
-    question = st.text_input("Ask a question about the documents:")
     if question:
         response = qa_chain({qa_chain.input_keys.pop(): question})
-        st.markdown("**Answer:** " + response['result'])
-
-        with st.expander("Sources"):
-            for doc in response['source_documents']:
+        st.write(response["result"])
+        with st.expander("Referenced content"):
+            for doc in response["source_documents"]:
                 st.markdown(doc.page_content[:500] + "...")
+elif question:
+    st.warning("Please upload a document first or wait for existing documents to load.")
