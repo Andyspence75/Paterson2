@@ -1,4 +1,3 @@
-
 import os
 import streamlit as st
 from langchain_community.document_loaders import (
@@ -19,7 +18,7 @@ st.title("Housing Disrepair QA System (Qdrant Cloud)")
 
 QDRANT_COLLECTION = "housing_rag_collection"
 
-# Qdrant Cloud credentials (set these as Streamlit secrets!)
+# Qdrant Cloud credentials from secrets
 QDRANT_URL = st.secrets["QDRANT_URL"]
 QDRANT_API_KEY = st.secrets["QDRANT_API_KEY"]
 
