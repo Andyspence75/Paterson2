@@ -1,59 +1,61 @@
 
+import os
 import streamlit as st
-from langchain.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.chains import RetrievalQA
 from langchain.vectorstores import FAISS
 from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.chains import RetrievalQA
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader
 from langchain_openai import ChatOpenAI
 from redactor import redact_text
-import os
-import pickle
 
-st.set_page_config(page_title="Housing QA System", layout="wide")
-st.title("🏠 Housing Disrepair QA System")
+st.title("Housing Disrepair QA System")
 
-persist_dir = "vector_store"
-if not os.path.exists(persist_dir):
-    os.makedirs(persist_dir)
+# General query box (optional input)
+general_query = st.text_input("Ask a general housing question (no document needed):")
 
-uploaded_file = st.file_uploader("Upload a PDF Survey Report", type="pdf")
-
-question = st.text_input("Ask a question (without uploading a file):")
+# File uploader for PDF/DOCX
+uploaded_files = st.file_uploader("Upload survey reports (PDF/DOCX)", type=["pdf", "docx"], accept_multiple_files=True)
 
 docs = []
 
-if uploaded_file:
-    st.info("Processing uploaded document...")
-    with open("temp.pdf", "wb") as f:
-        f.write(uploaded_file.read())
-    loader = PyPDFLoader("temp.pdf")
-    raw_docs = loader.load()
-    redacted_docs = [doc for doc in redact_text(raw_docs)]
-    docs.extend(redacted_docs)
+if uploaded_files:
+    for file in uploaded_files:
+        ext = file.name.split(".")[-1]
+        path = os.path.join("temp", file.name)
+        with open(path, "wb") as f:
+            f.write(file.read())
+        if ext == "pdf":
+            loader = PyPDFLoader(path)
+        elif ext == "docx":
+            loader = UnstructuredWordDocumentLoader(path)
+        else:
+            continue
+        docs.extend(loader.load())
 
-if docs:
+# Redact PII from documents
+docs = [doc.__class__(page_content=redact_text(doc.page_content), metadata=doc.metadata) for doc in docs]
+
+if docs or general_query:
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    splits = splitter.split_documents(docs)
+    splits = splitter.split_documents(docs) if docs else []
+
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    vectordb = FAISS.from_documents(splits, embeddings) if splits else None
 
-    # Load or build vector DB
-    if os.path.exists(f"{persist_dir}/faiss_index"):
-        db = FAISS.load_local(persist_dir, embeddings, allow_dangerous_deserialization=True)
-        db.add_documents(splits)
-    else:
-        db = FAISS.from_documents(splits, embeddings)
-    db.save_local(persist_dir)
-
-    retriever = db.as_retriever()
+    retriever = vectordb.as_retriever() if vectordb else None
     llm = ChatOpenAI(model_name="gpt-3.5-turbo")
-    qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
 
-    if question:
-        response = qa_chain({qa_chain.input_keys.pop(): question})
-        st.write(response["result"])
-        with st.expander("Referenced content"):
-            for doc in response["source_documents"]:
-                st.markdown(doc.page_content[:500] + "...")
-elif question:
-    st.warning("Please upload a document first or wait for existing documents to load.")
+    if general_query and not docs:
+        response = llm.invoke(general_query)
+        st.write("Response:", response.content)
+
+    elif docs:
+        question = st.text_input("Ask something about the uploaded documents:")
+        if question:
+            qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, return_source_documents=True)
+            response = qa_chain({"query": question})
+            st.write("Answer:", response["result"])
+            with st.expander("References"):
+                for doc in response["source_documents"]:
+                    st.markdown(doc.page_content[:500] + "...")

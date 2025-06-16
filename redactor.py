@@ -1,17 +1,21 @@
 
 import spacy
-from langchain.schema import Document
+import subprocess
+import sys
 
-nlp = spacy.load("en_core_web_sm")
+# Load spaCy model or download it
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+    nlp = spacy.load("en_core_web_sm")
 
-def redact_text(docs):
-    redacted_docs = []
-    for doc in docs:
-        text = doc.page_content
-        nlp_doc = nlp(text)
-        redacted_text = text
-        for ent in reversed(nlp_doc.ents):
-            if ent.label_ in ("PERSON", "GPE", "ORG", "LOC"):
-                redacted_text = redacted_text[:ent.start_char] + "[REDACTED]" + redacted_text[ent.end_char:]
-        redacted_docs.append(Document(page_content=redacted_text, metadata=doc.metadata))
-    return redacted_docs
+def redact_text(text):
+    doc = nlp(text)
+    redacted = []
+    for token in doc:
+        if token.ent_type_ in ["PERSON", "GPE", "ORG", "LOC"]:
+            redacted.append("[REDACTED]")
+        else:
+            redacted.append(token.text)
+    return " ".join(redacted)
