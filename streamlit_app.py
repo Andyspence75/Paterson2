@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 # Connect to Qdrant Cloud
 qdrant_client = QdrantClient(
     url="https://d159ceef-7eec-49cc-a25d-789140354a83.eu-west-1-0.aws.cloud.qdrant.io:6333",
-    api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.BWqFWA3KpSmdPLDORh3fBHZrEWXS94W2rbG6VN4X-Xg"
+    api_key="e"
 )
 
 # Load embedding model
