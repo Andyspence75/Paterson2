@@ -1,89 +1,86 @@
+
 import streamlit as st
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader
 from langchain_qdrant import Qdrant
 from qdrant_client import QdrantClient
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.chains import RetrievalQA
 from redactor import redact_text
 import tempfile
 import os
 
-# Configurations
-QDRANT_URL = st.secrets.get('QDRANT_URL')
-QDRANT_API_KEY = st.secrets.get('QDRANT_API_KEY')
-QDRANT_COLLECTION = 'housing_reports'
+st.title("Housing Disrepair QA System")
 
-# Set up Qdrant client
+QDRANT_URL = st.secrets.get("QDRANT_URL", os.environ.get("QDRANT_URL"))
+QDRANT_API_KEY = st.secrets.get("QDRANT_API_KEY", os.environ.get("QDRANT_API_KEY"))
+QDRANT_COLLECTION = "housing-disrepair"
+
 qdrant_client = QdrantClient(
     url=QDRANT_URL,
     api_key=QDRANT_API_KEY,
 )
 
-# User/admin toggle
-mode = st.sidebar.selectbox('Mode', ['User', 'Admin'])
+def process_uploaded_file(uploaded_file):
+    suffix = ".pdf" if uploaded_file.name.lower().endswith(".pdf") else ".docx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(uploaded_file.read())
+        tmp_path = tmp.name
+    if suffix == ".pdf":
+        loader = PyPDFLoader(tmp_path)
+    else:
+        loader = UnstructuredWordDocumentLoader(tmp_path)
+    docs = loader.load()
+    return docs
 
-st.title('Housing Disrepair QA System')
-st.write('Upload PDF or DOC survey reports and ask questions.')
-
-uploaded_files = st.file_uploader('Upload PDF or DOC files', type=['pdf', 'doc', 'docx'], accept_multiple_files=True)
-
-if 'vectorstore' not in st.session_state:
-    st.session_state.vectorstore = None
+uploaded_file = st.file_uploader("Upload a PDF or DOCX file", type=["pdf", "docx"])
 
 all_docs = []
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        suffix = uploaded_file.name.split('.')[-1].lower()
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.' + suffix) as temp_file:
-            temp_file.write(uploaded_file.read())
-            temp_path = temp_file.name
+if uploaded_file:
+    st.info("Processing and redacting document...")
+    docs = process_uploaded_file(uploaded_file)
+    # Redact content
+    for doc in docs:
+        doc.page_content = redact_text(doc.page_content)
+    all_docs.extend(docs)
 
-        if suffix == 'pdf':
-            loader = PyPDFLoader(temp_path)
-        elif suffix in ['doc', 'docx']:
-            loader = UnstructuredWordDocumentLoader(temp_path)
-        else:
-            continue
+# General chat box (does not require upload)
+general_query = st.text_input("General query (no upload required)")
 
-        docs = loader.load()
-        # Redact if enabled (admin can toggle)
-        if mode == 'User' or (mode == 'Admin' and st.sidebar.checkbox('Redact personal info', value=True)):
-            docs = [type(doc)(redact_text(doc.page_content), metadata=doc.metadata) for doc in docs]
-        all_docs.extend(docs)
-        os.unlink(temp_path)
-
-    # Split and embed
+if (uploaded_file and all_docs) or general_query:
+    # Embedding and Qdrant vector DB
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    splits = splitter.split_documents(all_docs)
+    splits = splitter.split_documents(all_docs) if all_docs else []
     embeddings = OpenAIEmbeddings()
-    vectorstore = Qdrant.from_documents(
-        documents=splits,
-        embedding=embeddings,
-        client=qdrant_client,
-        collection_name=QDRANT_COLLECTION,
-    )
-    st.session_state.vectorstore = vectorstore
-    st.success('Documents processed and indexed (Qdrant Cloud, persistent!).')
-
-# General QA box (can query even if no file uploaded)
-if st.session_state.vectorstore is not None:
-    st.header('Ask a question:')
-    question = st.text_input('Enter your query:')
-    if question:
-        llm = ChatOpenAI(model_name='gpt-3.5-turbo')
-        retriever = st.session_state.vectorstore.as_retriever()
-        from langchain.chains import RetrievalQA
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            retriever=retriever,
-            return_source_documents=True
+    # If new docs, re-index. If not, just use Qdrant retrieval
+    if splits:
+        vectorstore = Qdrant.from_documents(
+            splits, embeddings, client=qdrant_client, collection_name=QDRANT_COLLECTION
         )
-        response = qa_chain({'query': question})
-        st.markdown('**Answer:** ' + response['result'])
-        if response.get('source_documents'):
-            with st.expander('See referenced content'):
-                for doc in response['source_documents']:
-                    st.markdown('---')
-                    st.text(redact_text(doc.page_content[:500]) + '...')
-else:
-    st.info('No documents indexed yet. Upload to start, or ask a general query (if previous data exists).')
+        st.session_state.vectorstore = vectorstore
+    else:
+        # Only connect to existing
+        vectorstore = Qdrant(
+            client=qdrant_client,
+            collection_name=QDRANT_COLLECTION,
+            embeddings=embeddings,
+        )
+        st.session_state.vectorstore = vectorstore
+    retriever = vectorstore.as_retriever()
+    llm = ChatOpenAI(model_name="gpt-3.5-turbo")
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm, retriever=retriever, return_source_documents=True
+    )
+
+    if uploaded_file and st.session_state.vectorstore:
+        st.success("Documents processed, indexed, and redacted.")
+        query = st.text_input("Ask a question about the uploaded documents:")
+        if query:
+            response = qa_chain({"query": query})
+            st.write(response["result"])
+            with st.expander("References"):
+                for doc in response["source_documents"]:
+                    st.markdown(doc.page_content[:300] + "...")
+    elif general_query:
+        response = qa_chain({"query": general_query})
+        st.write(response["result"])
