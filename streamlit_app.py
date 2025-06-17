@@ -1,6 +1,7 @@
 
 import os
 import streamlit as st
+st.set_page_config(page_title="Housing Disrepair QA", layout="wide")
 
 
 from qdrant_client import QdrantClient
@@ -66,7 +67,6 @@ from langchain.chains import RetrievalQA
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from redactor import redact_text
 
-st.set_page_config(page_title="Housing Disrepair QA", layout="wide")
 st.title("Housing Disrepair QA System")
 
 FAISS_INDEX_PATH = "vectorstore.index"
