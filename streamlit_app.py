@@ -1,86 +1,132 @@
 
-import streamlit as st
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader
-from langchain_qdrant import Qdrant
-from qdrant_client import QdrantClient
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.chains import RetrievalQA
-from redactor import redact_text
-import tempfile
 import os
+import streamlit as st
 
-st.title("Housing Disrepair QA System")
 
-QDRANT_URL = st.secrets.get("QDRANT_URL", os.environ.get("QDRANT_URL"))
-QDRANT_API_KEY = st.secrets.get("QDRANT_API_KEY", os.environ.get("QDRANT_API_KEY"))
-QDRANT_COLLECTION = "housing-disrepair"
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import VectorParams, Distance, PointStruct
+from sentence_transformers import SentenceTransformer
 
+# Connect to Qdrant Cloud
 qdrant_client = QdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY,
+    url="https://d159ceef-7eec-49cc-a25d-789140354a83.eu-west-1-0.aws.cloud.qdrant.io:6333",
+    api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.BWqFWA3KpSmdPLDORh3fBHZrEWXS94W2rbG6VN4X-Xg"
 )
 
-def process_uploaded_file(uploaded_file):
-    suffix = ".pdf" if uploaded_file.name.lower().endswith(".pdf") else ".docx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(uploaded_file.read())
-        tmp_path = tmp.name
-    if suffix == ".pdf":
-        loader = PyPDFLoader(tmp_path)
+# Load embedding model
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Create collection (if not exists)
+qdrant_client.recreate_collection(
+    collection_name="paterson_docs",
+    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+)
+
+def upsert_documents(documents):
+    points = []
+    for i, doc in enumerate(documents):
+        embedding = embedding_model.encode(doc)
+        points.append(PointStruct(id=i, vector=embedding.tolist(), payload={"text": doc}))
+    qdrant_client.upsert(collection_name="paterson_docs", points=points)
+
+def query_qdrant(query_text, top_k=5):
+    embedding = embedding_model.encode(query_text).tolist()
+    results = qdrant_client.search(
+        collection_name="paterson_docs",
+        query_vector=embedding,
+        limit=top_k
+    )
+    return [hit.payload["text"] for hit in results]
+
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    UnstructuredFileLoader,
+    UnstructuredWordDocumentLoader,
+    UnstructuredPowerPointLoader,
+)
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from redactor import redact_text
+
+st.set_page_config(page_title="Housing Disrepair QA", layout="wide")
+st.title("Housing Disrepair QA System")
+
+FAISS_INDEX_PATH = "vectorstore.index"
+
+def get_loader_for_file(filename):
+    ext = filename.lower().split(".")[-1]
+    if ext == "pdf":
+        return PyPDFLoader(filename)
+    elif ext == "txt":
+        return UnstructuredFileLoader(filename)
+    elif ext in ["doc", "docx"]:
+        return UnstructuredWordDocumentLoader(filename)
+    elif ext in ["ppt", "pptx"]:
+        return UnstructuredPowerPointLoader(filename)
     else:
-        loader = UnstructuredWordDocumentLoader(tmp_path)
-    docs = loader.load()
-    return docs
+        return None
 
-uploaded_file = st.file_uploader("Upload a PDF or DOCX file", type=["pdf", "docx"])
+def load_vectorstore():
+    if os.path.exists(FAISS_INDEX_PATH):
+        try:
+            return FAISS.load_local(FAISS_INDEX_PATH, OpenAIEmbeddings(), allow_dangerous_deserialization=True)
+        except Exception as e:
+            st.warning(f"Failed to load previous vectorstore: {e}")
+            return None
+    return None
 
-all_docs = []
-if uploaded_file:
-    st.info("Processing and redacting document...")
-    docs = process_uploaded_file(uploaded_file)
-    # Redact content
-    for doc in docs:
-        doc.page_content = redact_text(doc.page_content)
-    all_docs.extend(docs)
+def save_vectorstore(vectorstore):
+    try:
+        vectorstore.save_local(FAISS_INDEX_PATH)
+    except Exception as e:
+        st.error(f"Could not save vectorstore: {e}")
 
-# General chat box (does not require upload)
-general_query = st.text_input("General query (no upload required)")
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = load_vectorstore()
 
-if (uploaded_file and all_docs) or general_query:
-    # Embedding and Qdrant vector DB
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    splits = splitter.split_documents(all_docs) if all_docs else []
-    embeddings = OpenAIEmbeddings()
-    # If new docs, re-index. If not, just use Qdrant retrieval
-    if splits:
-        vectorstore = Qdrant.from_documents(
-            splits, embeddings, client=qdrant_client, collection_name=QDRANT_COLLECTION
-        )
-        st.session_state.vectorstore = vectorstore
-    else:
-        # Only connect to existing
-        vectorstore = Qdrant(
-            client=qdrant_client,
-            collection_name=QDRANT_COLLECTION,
-            embeddings=embeddings,
-        )
-        st.session_state.vectorstore = vectorstore
-    retriever = vectorstore.as_retriever()
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo")
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm, retriever=retriever, return_source_documents=True
+with st.sidebar:
+    st.header("Document Upload")
+    uploaded_files = st.file_uploader(
+        "Upload PDF, DOC, PPT, or TXT files",
+        type=["pdf", "txt", "doc", "docx", "ppt", "pptx"],
+        accept_multiple_files=True
     )
 
-    if uploaded_file and st.session_state.vectorstore:
-        st.success("Documents processed, indexed, and redacted.")
-        query = st.text_input("Ask a question about the uploaded documents:")
-        if query:
-            response = qa_chain({"query": query})
-            st.write(response["result"])
-            with st.expander("References"):
-                for doc in response["source_documents"]:
-                    st.markdown(doc.page_content[:300] + "...")
-    elif general_query:
-        response = qa_chain({"query": general_query})
-        st.write(response["result"])
+    if uploaded_files:
+        all_docs = []
+        for uploaded_file in uploaded_files:
+            with open(uploaded_file.name, "wb") as f:
+                f.write(uploaded_file.read())
+
+            loader = get_loader_for_file(uploaded_file.name)
+            if loader is not None:
+                docs = loader.load()
+                docs = [doc for doc in docs if doc.page_content.strip()]
+                docs = [doc.__class__(page_content=redact_text(doc.page_content)) for doc in docs]
+                all_docs.extend(docs)
+            else:
+                st.warning(f"Unsupported file type: {uploaded_file.name}")
+
+        if all_docs:
+            splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+            splits = splitter.split_documents(all_docs)
+            embeddings = OpenAIEmbeddings()
+            vectordb = FAISS.from_documents(splits, embeddings)
+            st.session_state.vectorstore = vectordb
+            save_vectorstore(vectordb)
+            st.success("Documents processed and indexed. (Saved for future use!)")
+
+if st.session_state.vectorstore:
+    llm = ChatOpenAI(model_name="gpt-3.5-turbo")
+    retriever = st.session_state.vectorstore.as_retriever()
+    qa = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, return_source_documents=True)
+
+    query = st.text_input("Ask a question about the documents:")
+    if query:
+        result = qa({"query": query})
+        st.write("**Answer:**", result["result"])
+        with st.expander("See Sources"):
+            for doc in result["source_documents"]:
+                st.markdown(doc.page_content[:300] + "...")
