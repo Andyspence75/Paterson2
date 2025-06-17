@@ -29,6 +29,22 @@ def upsert_documents(documents):
         points.append(PointStruct(id=i, vector=embedding.tolist(), payload={"text": doc}))
     qdrant_client.upsert(collection_name="paterson_docs", points=points)
 
+
+# Example documents to load at startup
+initial_docs = [
+    "The tenant reported water ingress in the living room ceiling.",
+    "There was mold on the bathroom wall due to poor ventilation.",
+    "The kitchen window is broken and does not close properly.",
+    "The intercom system has not worked since January.",
+    "There is rising damp in the hallway and electrical issues in the bedroom."
+]
+
+# Push documents to Qdrant on app startup
+st.write("📡 Indexing documents into Qdrant...")
+upsert_documents(initial_docs)
+st.success("✅ Documents loaded into Qdrant.")
+
+
 def query_qdrant(query_text, top_k=5):
     embedding = embedding_model.encode(query_text).tolist()
     results = qdrant_client.search(
