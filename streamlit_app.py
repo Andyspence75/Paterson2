@@ -8,11 +8,12 @@ import docx
 from pptx import Presentation
 from langchain_openai import ChatOpenAI
 import openai
+import os
 
 st.set_page_config(page_title="Housing Disrepair QA", layout="wide")
 
-# Load API keys from Streamlit secrets
-openai.api_key = st.secrets["openai"]["api_key"]
+# Load API keys with fallback to environment
+openai.api_key = st.secrets["openai"].get("api_key") or os.environ.get("OPENAI_API_KEY")
 qdrant_url = st.secrets["qdrant"]["url"]
 qdrant_key = st.secrets["qdrant"]["api_key"]
 
@@ -77,7 +78,6 @@ if uploaded_file:
         st.warning("⚠️ No readable text found in the uploaded file.")
 
 st.divider()
-
 st.subheader("💬 Ask a Question")
 
 user_query = st.chat_input("Ask me about housing disrepair...")
