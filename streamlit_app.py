@@ -93,7 +93,7 @@ if user_query:
     else:
         prompt = user_query
 
-    llm = ChatOpenAI(temperature=0)
+    llm = ChatOpenAI(temperature=0, api_key=st.secrets["openai"].get("api_key") or os.environ.get("OPENAI_API_KEY"))
     answer = llm.invoke(prompt)
 
     with st.chat_message("assistant"):
