@@ -28,10 +28,11 @@ if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
         collection_name=COLLECTION_NAME,
         vectors_config=VectorParams(size=384, distance=Distance.COSINE)
     )
-        collection_name=COLLECTION_NAME,
+    qdrant_client.create_collection(
         vectors_config=VectorParams(size=384, distance=Distance.COSINE)
     )
-    collection_name=COLLECTION_NAME,
+        vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+    )
     vectors_config=VectorParams(size=384, distance=Distance.COSINE)
 )
 
@@ -44,11 +45,9 @@ def embed_text_chunks(chunks):
 
 def upsert_documents(text_chunks):
     points = embed_text_chunks(text_chunks)
-    qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
 
 def query_qdrant(query_text, top_k=5):
     vector = embedding_model.encode(query_text).tolist()
-    hits = qdrant_client.search(collection_name=COLLECTION_NAME, query_vector=vector, limit=top_k)
     return [hit.payload["text"] for hit in hits]
 
 def extract_text_from_file(file):
