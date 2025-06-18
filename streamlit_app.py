@@ -97,11 +97,19 @@ if user_query:
 
     llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo", api_key=st.secrets["openai"].get("api_key") or os.environ.get("OPENAI_API_KEY"))
 try:
+    if context_docs:
+        prompt = f"Answer the question based on the following documents:\n\n{context_text}\n\nQuestion: {user_query}"
+    else:
+        prompt = user_query
+    prompt = prompt[:4000]  # truncate prompt if too long
+    answer = llm.invoke(prompt)
     prompt = prompt[:4000]  # truncate prompt if too long
     answer = llm.invoke(prompt)
     prompt = prompt[:4000]  # truncate prompt if too long
     answer = llm.invoke(prompt)
 except Exception as e:
+    st.error(f"OpenAI request failed: {str(e)}")
+    answer = None
     st.error(f"OpenAI request failed: {str(e)}")
     st.error(f"OpenAI request failed: {str(e)}")
     answer = None
@@ -114,4 +122,5 @@ except Exception as e:
             for i, doc in enumerate(context_docs, 1):
                 st.markdown(f"**{i}.** {doc}")
             st.markdown("---")
+    if answer is not None:
         st.markdown(f"**Answer:** {answer.content}")
