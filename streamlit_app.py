@@ -40,8 +40,17 @@ def upsert_documents(text_chunks):
     points = embed_text_chunks(text_chunks)
 
 def query_qdrant(query_text, top_k=5):
-    vector = embedding_model.encode(query_text).tolist()
-    return [hit.payload["text"] for hit in hits]
+    hits = []
+    try:
+        vector = embedding_model.encode(query_text).tolist()
+        hits = qdrant_client.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=vector,
+            limit=top_k
+        )
+    except Exception as e:
+        st.warning(f"Qdrant search failed: {e}")
+    return [hit.payload["text"] for hit in hits if "text" in hit.payload]
 
 def extract_text_from_file(file):
     if file.name.endswith(".pdf"):
