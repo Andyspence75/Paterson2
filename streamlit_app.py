@@ -103,7 +103,7 @@ if user_query:
 
 try:
     openai_api_key = st.secrets.get("openai", {}).get("api_key")
-except Exception:
+    except Exception:
     openai_api_key = os.environ.get("OPENAI_API_KEY")
 try:
     if context_text:
