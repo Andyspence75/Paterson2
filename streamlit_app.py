@@ -94,10 +94,12 @@ if user_query:
         prompt = user_query
 
     llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo", api_key=st.secrets["openai"].get("api_key") or os.environ.get("OPENAI_API_KEY"))
-    try:
+try:
     prompt = prompt[:4000]  # truncate prompt if too long
     answer = llm.invoke(prompt)
 except Exception as e:
+    st.error(f"OpenAI request failed: {str(e)}")
+    answer = None
     st.error(f"OpenAI request failed: {str(e)}")
     answer = None
 
