@@ -44,7 +44,11 @@ def query_qdrant(query_text, top_k=5):
     try:
         vector = embedding_model.encode(query_text).tolist()
     try:
+    try:
         hits = qdrant_client.query_points(
+    except Exception as e:
+        st.error(f"Qdrant query failed: {e}")
+        hits = []
     except Exception as e:
         st.error(f"Qdrant query failed: {e}")
         hits = []
