@@ -45,7 +45,7 @@ def query_qdrant(query_text, top_k=5):
         vector = embedding_model.encode(query_text).tolist()
         hits = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
-            vector=vector,
+            query_vector=vector,
             limit=top_k
         )
     except Exception as e:
