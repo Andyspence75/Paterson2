@@ -2,11 +2,11 @@
 import streamlit as st
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import VectorParams, Distance, PointStruct
-from sentence_transformers import SentenceTransformer
 from PyPDF2 import PdfReader
 import docx
 from pptx import Presentation
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+embeddings = OpenAIEmbeddings(api_key=openai_api_key)
 import openai
 import os
 
@@ -18,7 +18,6 @@ qdrant_key = st.secrets["qdrant"]["api_key"]
 
 # Connect to Qdrant
 qdrant_client = QdrantClient(url=qdrant_url, api_key=qdrant_key)
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # Ensure collection exists
 COLLECTION_NAME = "paterson_docs"
@@ -31,7 +30,7 @@ if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
 # Functions
 def embed_text_chunks(chunks):
     return [
-        PointStruct(id=i, vector=embedding_model.encode(c).tolist(), payload={"text": c})
+    vector = embeddings.embed_query(text)
         for i, c in enumerate(chunks)
     ]
 
@@ -41,7 +40,7 @@ def upsert_documents(text_chunks):
 def query_qdrant(query_text, top_k=5):
     hits = []
     try:
-        vector = embedding_model.encode(query_text).tolist()
+    vector = embeddings.embed_query(text)
         hits = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query_vector=vector,
