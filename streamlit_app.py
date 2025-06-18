@@ -50,28 +50,7 @@ def query_qdrant(query_text, top_k=5):
         )
     except Exception as e:
         st.error(f"Qdrant query failed: {e}")
-        hits = []
     return hits
-    hits = []
-    try:
-        vector = embedding_model.encode(query_text).tolist()
-    try:
-    try:
-        hits = qdrant_client.query_points(
-    except Exception as e:
-        st.error(f"Qdrant query failed: {e}")
-        hits = []
-    except Exception as e:
-        st.error(f"Qdrant query failed: {e}")
-        hits = []
-            collection_name=COLLECTION_NAME,
-            vector=vector,
-            limit=top_k
-        )
-    except Exception as e:
-        st.warning(f"Qdrant search failed: {e}")
-    return [hit.payload["text"] for hit in hits if "text" in hit.payload]
-
 def extract_text_from_file(file):
     if file.name.endswith(".pdf"):
         reader = PdfReader(file)
