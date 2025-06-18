@@ -1,148 +1,105 @@
 
-import os
 import streamlit as st
-st.set_page_config(page_title="Housing Disrepair QA", layout="wide")
-
-
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import VectorParams, Distance, PointStruct
 from sentence_transformers import SentenceTransformer
+from PyPDF2 import PdfReader
+import docx
+from pptx import Presentation
+from langchain_openai import ChatOpenAI
+import openai
 
-# Connect to Qdrant Cloud
-qdrant_client = QdrantClient(
-    url="https://d159ceef-7eec-49cc-a25d-789140354a83.eu-west-1-0.aws.cloud.qdrant.io:6333",
-    api_key="e"
-)
+st.set_page_config(page_title="Housing Disrepair QA", layout="wide")
 
-# Load embedding model
+# Load API keys from Streamlit secrets
+openai.api_key = st.secrets["openai"]["api_key"]
+qdrant_url = st.secrets["qdrant"]["url"]
+qdrant_key = st.secrets["qdrant"]["api_key"]
+
+# Connect to Qdrant
+qdrant_client = QdrantClient(url=qdrant_url, api_key=qdrant_key)
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# Create collection (if not exists)
+# Ensure collection exists
+COLLECTION_NAME = "paterson_docs"
 qdrant_client.recreate_collection(
-    collection_name="paterson_docs",
+    collection_name=COLLECTION_NAME,
     vectors_config=VectorParams(size=384, distance=Distance.COSINE)
 )
 
-def upsert_documents(documents):
-    points = []
-    for i, doc in enumerate(documents):
-        embedding = embedding_model.encode(doc)
-        points.append(PointStruct(id=i, vector=embedding.tolist(), payload={"text": doc}))
-    qdrant_client.upsert(collection_name="paterson_docs", points=points)
+# Functions
+def embed_text_chunks(chunks):
+    return [
+        PointStruct(id=i, vector=embedding_model.encode(c).tolist(), payload={"text": c})
+        for i, c in enumerate(chunks)
+    ]
 
-
-# Example documents to load at startup
-initial_docs = [
-    "The tenant reported water ingress in the living room ceiling.",
-    "There was mold on the bathroom wall due to poor ventilation.",
-    "The kitchen window is broken and does not close properly.",
-    "The intercom system has not worked since January.",
-    "There is rising damp in the hallway and electrical issues in the bedroom."
-]
-
-# Push documents to Qdrant on app startup
-st.write("📡 Indexing documents into Qdrant...")
-upsert_documents(initial_docs)
-st.success("✅ Documents loaded into Qdrant.")
-
+def upsert_documents(text_chunks):
+    points = embed_text_chunks(text_chunks)
+    qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
 
 def query_qdrant(query_text, top_k=5):
-    embedding = embedding_model.encode(query_text).tolist()
-    results = qdrant_client.search(
-        collection_name="paterson_docs",
-        query_vector=embedding,
-        limit=top_k
-    )
-    return [hit.payload["text"] for hit in results]
+    vector = embedding_model.encode(query_text).tolist()
+    hits = qdrant_client.search(collection_name=COLLECTION_NAME, query_vector=vector, limit=top_k)
+    return [hit.payload["text"] for hit in hits]
 
-from langchain_community.document_loaders import (
-    PyPDFLoader,
-    UnstructuredFileLoader,
-    UnstructuredWordDocumentLoader,
-    UnstructuredPowerPointLoader,
-)
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.chains import RetrievalQA
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from redactor import redact_text
-
-st.title("Housing Disrepair QA System")
-
-FAISS_INDEX_PATH = "vectorstore.index"
-
-def get_loader_for_file(filename):
-    ext = filename.lower().split(".")[-1]
-    if ext == "pdf":
-        return PyPDFLoader(filename)
-    elif ext == "txt":
-        return UnstructuredFileLoader(filename)
-    elif ext in ["doc", "docx"]:
-        return UnstructuredWordDocumentLoader(filename)
-    elif ext in ["ppt", "pptx"]:
-        return UnstructuredPowerPointLoader(filename)
+def extract_text_from_file(file):
+    if file.name.endswith(".pdf"):
+        reader = PdfReader(file)
+        return " ".join([page.extract_text() or "" for page in reader.pages])
+    elif file.name.endswith(".docx"):
+        doc = docx.Document(file)
+        return "\n".join([p.text for p in doc.paragraphs])
+    elif file.name.endswith(".pptx"):
+        prs = Presentation(file)
+        text = ""
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    text += shape.text + "\n"
+        return text
+    elif file.name.endswith(".txt"):
+        return file.read().decode("utf-8")
     else:
-        return None
+        return ""
 
-def load_vectorstore():
-    if os.path.exists(FAISS_INDEX_PATH):
-        try:
-            return FAISS.load_local(FAISS_INDEX_PATH, OpenAIEmbeddings(), allow_dangerous_deserialization=True)
-        except Exception as e:
-            st.warning(f"Failed to load previous vectorstore: {e}")
-            return None
-    return None
+# UI
+st.title("📂 Upload & Ask – Housing Disrepair Assistant")
 
-def save_vectorstore(vectorstore):
-    try:
-        vectorstore.save_local(FAISS_INDEX_PATH)
-    except Exception as e:
-        st.error(f"Could not save vectorstore: {e}")
+uploaded_file = st.file_uploader("Upload a document (.pdf, .docx, .pptx, .txt)", type=["pdf", "docx", "pptx", "txt"])
+if uploaded_file:
+    text = extract_text_from_file(uploaded_file)
+    if text.strip():
+        st.success("✅ Document uploaded and indexed into Qdrant.")
+        chunks = [text[i:i+500] for i in range(0, len(text), 500)]
+        upsert_documents(chunks)
+    else:
+        st.warning("⚠️ No readable text found in the uploaded file.")
 
-if "vectorstore" not in st.session_state:
-    st.session_state.vectorstore = load_vectorstore()
+st.divider()
 
-with st.sidebar:
-    st.header("Document Upload")
-    uploaded_files = st.file_uploader(
-        "Upload PDF, DOC, PPT, or TXT files",
-        type=["pdf", "txt", "doc", "docx", "ppt", "pptx"],
-        accept_multiple_files=True
-    )
+st.subheader("💬 Ask a Question")
 
-    if uploaded_files:
-        all_docs = []
-        for uploaded_file in uploaded_files:
-            with open(uploaded_file.name, "wb") as f:
-                f.write(uploaded_file.read())
+user_query = st.chat_input("Ask me about housing disrepair...")
+if user_query:
+    with st.chat_message("user"):
+        st.markdown(user_query)
 
-            loader = get_loader_for_file(uploaded_file.name)
-            if loader is not None:
-                docs = loader.load()
-                docs = [doc for doc in docs if doc.page_content.strip()]
-                docs = [doc.__class__(page_content=redact_text(doc.page_content)) for doc in docs]
-                all_docs.extend(docs)
-            else:
-                st.warning(f"Unsupported file type: {uploaded_file.name}")
+    context_docs = query_qdrant(user_query)
+    context_text = "\n".join(context_docs)
 
-        if all_docs:
-            splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-            splits = splitter.split_documents(all_docs)
-            embeddings = OpenAIEmbeddings()
-            vectordb = FAISS.from_documents(splits, embeddings)
-            st.session_state.vectorstore = vectordb
-            save_vectorstore(vectordb)
-            st.success("Documents processed and indexed. (Saved for future use!)")
+    if context_docs:
+        prompt = f"Answer the question based on the following documents:\n\n{context_text}\n\nQuestion: {user_query}"
+    else:
+        prompt = user_query
 
-if st.session_state.vectorstore:
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo")
-    retriever = st.session_state.vectorstore.as_retriever()
-    qa = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, return_source_documents=True)
+    llm = ChatOpenAI(temperature=0)
+    answer = llm.invoke(prompt)
 
-    query = st.text_input("Ask a question about the documents:")
-    if query:
-        result = qa({"query": query})
-        st.write("**Answer:**", result["result"])
-        with st.expander("See Sources"):
-            for doc in result["source_documents"]:
-                st.markdown(doc.page_content[:300] + "...")
+    with st.chat_message("assistant"):
+        if context_docs:
+            st.markdown("**Context (from Qdrant):**")
+            for i, doc in enumerate(context_docs, 1):
+                st.markdown(f"**{i}.** {doc}")
+            st.markdown("---")
+        st.markdown(f"**Answer:** {answer.content}")
