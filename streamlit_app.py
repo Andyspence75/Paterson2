@@ -13,7 +13,6 @@ import os
 st.set_page_config(page_title="Housing Disrepair QA", layout="wide")
 
 # Load API keys with fallback to environment
-openai.api_key = st.secrets["openai"].get("api_key") or os.environ.get("OPENAI_API_KEY")
 qdrant_url = st.secrets["qdrant"]["url"]
 qdrant_key = st.secrets["qdrant"]["api_key"]
 
@@ -106,7 +105,8 @@ if user_query:
     else:
         prompt = user_query
 
-    llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo", api_key=st.secrets["openai"].get("api_key") or os.environ.get("OPENAI_API_KEY"))
+openai_api_key = st.secrets.get("openai", {}).get("api_key") or os.environ.get("OPENAI_API_KEY")
+llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo", api_key=openai_api_key)
 try:
     if context_text:
         prompt = f"Answer the question based on the following documents:\n\n{context_text}\n\nQuestion: {user_query}"
