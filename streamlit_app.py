@@ -43,9 +43,13 @@ def query_qdrant(query_text, top_k=5):
     hits = []
     try:
         vector = embedding_model.encode(query_text).tolist()
+    try:
         hits = qdrant_client.query_points(
+    except Exception as e:
+        st.error(f"Qdrant query failed: {e}")
+        hits = []
             collection_name=COLLECTION_NAME,
-            query_vector=vector,
+            vector=vector,
             limit=top_k
         )
     except Exception as e:
@@ -114,7 +118,11 @@ try:
     else:
         prompt = user_query
     prompt = prompt[:4000]
-    answer = llm.invoke(prompt)
+    try:
+        answer = llm.invoke(prompt)
+    except Exception as e:
+        st.error(f"OpenAI call failed: {e}")
+        answer = None
     if context_docs:
         prompt = f"Answer the question based on the following documents:\n\n{context_text}\n\nQuestion: {user_query}"
     else:
