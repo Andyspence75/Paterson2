@@ -81,6 +81,8 @@ st.divider()
 st.subheader("💬 Ask a Question")
 
 user_query = st.chat_input("Ask me about housing disrepair...")
+context_docs = []
+answer = None
 if user_query:
     with st.chat_message("user"):
         st.markdown(user_query)
@@ -97,7 +99,10 @@ if user_query:
 try:
     prompt = prompt[:4000]  # truncate prompt if too long
     answer = llm.invoke(prompt)
+    prompt = prompt[:4000]  # truncate prompt if too long
+    answer = llm.invoke(prompt)
 except Exception as e:
+    st.error(f"OpenAI request failed: {str(e)}")
     st.error(f"OpenAI request failed: {str(e)}")
     answer = None
     st.error(f"OpenAI request failed: {str(e)}")
