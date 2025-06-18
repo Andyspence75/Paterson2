@@ -23,7 +23,11 @@ embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # Ensure collection exists
 COLLECTION_NAME = "paterson_docs"
-qdrant_client.recreate_collection(
+if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
+    qdrant_client.create_collection(
+        collection_name=COLLECTION_NAME,
+        vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+    )
     collection_name=COLLECTION_NAME,
     vectors_config=VectorParams(size=384, distance=Distance.COSINE)
 )
