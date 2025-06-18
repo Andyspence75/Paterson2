@@ -29,10 +29,7 @@ if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
 
 # Functions
 def embed_text_chunks(chunks):
-    return [
-    vector = embeddings.embed_query(text)
-        for i, c in enumerate(chunks)
-    ]
+    return [embeddings.embed_query(c) for c in chunks]
 
 def upsert_documents(text_chunks):
     points = embed_text_chunks(text_chunks)
