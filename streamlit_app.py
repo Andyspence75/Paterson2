@@ -28,6 +28,9 @@ if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
         collection_name=COLLECTION_NAME,
         vectors_config=VectorParams(size=384, distance=Distance.COSINE)
     )
+        collection_name=COLLECTION_NAME,
+        vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+    )
     collection_name=COLLECTION_NAME,
     vectors_config=VectorParams(size=384, distance=Distance.COSINE)
 )
