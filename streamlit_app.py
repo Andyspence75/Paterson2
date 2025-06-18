@@ -82,12 +82,16 @@ st.subheader("💬 Ask a Question")
 
 user_query = st.chat_input("Ask me about housing disrepair...")
 context_docs = []
+context_text = ''
+answer = None
+context_docs = []
 answer = None
 if user_query:
     with st.chat_message("user"):
         st.markdown(user_query)
 
-    context_docs = query_qdrant(user_query)
+    context_docs = query_qdrant(user_query) or []
+    context_text = "\n".join(context_docs) if context_docs else ""
     context_text = "\n".join(context_docs)
 
     if context_docs:
@@ -97,6 +101,12 @@ if user_query:
 
     llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo", api_key=st.secrets["openai"].get("api_key") or os.environ.get("OPENAI_API_KEY"))
 try:
+    if context_text:
+        prompt = f"Answer the question based on the following documents:\n\n{context_text}\n\nQuestion: {user_query}"
+    else:
+        prompt = user_query
+    prompt = prompt[:4000]
+    answer = llm.invoke(prompt)
     if context_docs:
         prompt = f"Answer the question based on the following documents:\n\n{context_text}\n\nQuestion: {user_query}"
     else:
@@ -108,6 +118,8 @@ try:
     prompt = prompt[:4000]  # truncate prompt if too long
     answer = llm.invoke(prompt)
 except Exception as e:
+    st.error(f"OpenAI request failed: {str(e)}")
+    answer = None
     st.error(f"OpenAI request failed: {str(e)}")
     answer = None
     st.error(f"OpenAI request failed: {str(e)}")
