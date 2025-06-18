@@ -37,7 +37,7 @@ def upsert_documents(text_chunks):
 def query_qdrant(query_text, top_k=5):
     hits = []
     try:
-    vector = embeddings.embed_query(text)
+        vector = embeddings.embed_query(query_text)
         hits = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query_vector=vector,
